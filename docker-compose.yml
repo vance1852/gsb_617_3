@@ -1,0 +1,34 @@
+services:
+  db:
+    image: mysql:8.0
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: museum_pass
+      MYSQL_USER: museum
+      MYSQL_PASSWORD: museum123
+    healthcheck:
+      test:
+        ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - db_data:/var/lib/mysql
+
+  app:
+    build: .
+    environment:
+      DATABASE_URL: "mysql://museum:museum123@db:3306/museum_pass?charset=utf8mb4"
+      APP_PORT: "7651"
+      JWT_SECRET: "museum-pass-admin-dev-secret-change-me"
+      ADMIN_USERNAME: "admin"
+      ADMIN_PASSWORD: "admin123"
+    ports:
+      - "7651:7651"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:

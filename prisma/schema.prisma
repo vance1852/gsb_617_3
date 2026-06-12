@@ -1,0 +1,52 @@
+// 博物馆通票预约与参观管理 —— 数据模型
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique @db.VarChar(64)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  displayName  String   @map("display_name") @db.VarChar(64)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
+
+model Museum {
+  id            Int      @id @default(autoincrement())
+  name          String   @db.VarChar(128)
+  address       String   @default("") @db.VarChar(255)
+  // 每日可预约参观人数上限
+  dailyCapacity Int      @default(0) @map("daily_capacity")
+  // 状态：open 开放 / closed 闭馆 / maintenance 维护
+  status        String   @default("open") @db.VarChar(16)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  reservations Reservation[]
+
+  @@map("museums")
+}
+
+model Reservation {
+  id          Int      @id @default(autoincrement())
+  museumId    Int      @map("museum_id")
+  visitorName String   @map("visitor_name") @db.VarChar(64)
+  phone       String   @default("") @db.VarChar(32)
+  visitDate   String   @map("visit_date") @db.VarChar(10) // YYYY-MM-DD
+  timeSlot    String   @map("time_slot") @db.VarChar(16) // am / pm
+  passType    String   @map("pass_type") @db.VarChar(32) // single / annual
+  // 状态：booked 已预约 / visited 已参观 / cancelled 已取消
+  status      String   @default("booked") @db.VarChar(16)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  museum Museum @relation(fields: [museumId], references: [id], onDelete: Cascade)
+
+  @@index([museumId, visitDate])
+  @@map("reservations")
+}
