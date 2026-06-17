@@ -14,11 +14,59 @@ const createSchema = z.object({
   visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "日期格式应为 YYYY-MM-DD"),
   timeSlot: z.enum(["am", "pm"]),
   passType: z.enum(["single", "annual"]).optional().default("single"),
+  waitIfFull: z.boolean().optional().default(false),
 });
 
 const statusSchema = z.object({
   status: z.enum(["booked", "visited", "cancelled"]),
 });
+
+async function tryPromoteWaitlist(museumId: number, visitDate: string) {
+  const promoted: { id: number; reservationId: number }[] = [];
+
+  await prisma.$transaction(async (tx) => {
+    const museum = await tx.museum.findUnique({ where: { id: museumId } });
+    if (!museum) return;
+
+    const used = await tx.reservation.count({
+      where: {
+        museumId,
+        visitDate,
+        status: { not: "cancelled" },
+      },
+    });
+
+    const remaining = museum.dailyCapacity - used;
+    if (remaining <= 0) return;
+
+    const waiting = await tx.waitlist.findMany({
+      where: { museumId, visitDate, status: "waiting" },
+      orderBy: { id: "asc" },
+      take: remaining,
+    });
+
+    for (const item of waiting) {
+      const reservation = await tx.reservation.create({
+        data: {
+          museumId: item.museumId,
+          visitorName: item.visitorName,
+          phone: item.phone,
+          visitDate: item.visitDate,
+          timeSlot: item.timeSlot,
+          passType: item.passType,
+          status: "booked",
+        },
+      });
+      await tx.waitlist.update({
+        where: { id: item.id },
+        data: { status: "confirmed", confirmedAt: new Date() },
+      });
+      promoted.push({ id: item.id, reservationId: reservation.id });
+    }
+  });
+
+  return promoted;
+}
 
 router.get("/", async (req, res) => {
   const where: Record<string, unknown> = {};
@@ -60,7 +108,6 @@ router.post("/", async (req, res) => {
     return res.status(422).json({ detail: "该场馆当前不可预约" });
   }
 
-  // 容量校验：当天该场馆有效预约（非取消）不得超过每日上限
   const used = await prisma.reservation.count({
     where: {
       museumId: data.museumId,
@@ -69,7 +116,37 @@ router.post("/", async (req, res) => {
     },
   });
   if (used >= museum.dailyCapacity) {
-    return res.status(409).json({ detail: "该场馆当日预约已满" });
+    if (!data.waitIfFull) {
+      return res.status(409).json({ detail: "该场馆当日预约已满" });
+    }
+    const waiting = await prisma.waitlist.create({
+      data: {
+        museumId: data.museumId,
+        visitorName: data.visitorName,
+        phone: data.phone,
+        visitDate: data.visitDate,
+        timeSlot: data.timeSlot,
+        passType: data.passType,
+      },
+    });
+    const position = await prisma.waitlist.count({
+      where: {
+        museumId: data.museumId,
+        visitDate: data.visitDate,
+        status: "waiting",
+        id: { lte: waiting.id },
+      },
+    });
+    return res.status(202).json({
+      waitlist_id: waiting.id,
+      museum_id: waiting.museumId,
+      visitor_name: waiting.visitorName,
+      visit_date: waiting.visitDate,
+      time_slot: waiting.timeSlot,
+      pass_type: waiting.passType,
+      status: "waiting",
+      position,
+    });
   }
 
   const created = await prisma.reservation.create({ data });
@@ -92,10 +169,19 @@ router.patch("/:id/status", async (req, res) => {
   const id = Number(req.params.id);
   const exists = await prisma.reservation.findUnique({ where: { id } });
   if (!exists) return res.status(404).json({ detail: "预约不存在" });
+
+  const isCancelling =
+    parsed.data.status === "cancelled" && exists.status !== "cancelled";
+
   const updated = await prisma.reservation.update({
     where: { id },
     data: { status: parsed.data.status },
   });
+
+  if (isCancelling) {
+    await tryPromoteWaitlist(exists.museumId, exists.visitDate);
+  }
+
   res.json({ id: updated.id, status: updated.status });
 });
 
