@@ -20,5 +20,17 @@ export function createApp() {
   app.use("/api/waitlist", waitlistRouter);
   app.use("/api/dashboard", dashboardRouter);
 
+  app.use(
+    (
+      err: unknown,
+      _req: express.Request,
+      res: express.Response,
+      _next: express.NextFunction,
+    ) => {
+      console.error("Unhandled error:", err);
+      res.status(500).json({ detail: "服务器内部错误" });
+    },
+  );
+
   return app;
 }

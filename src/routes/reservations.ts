@@ -69,8 +69,10 @@ router.post("/", async (req, res) => {
     },
   });
 
+  const { waitlist, ...reservationData } = data;
+
   if (used >= museum.dailyCapacity) {
-    if (!data.waitlist) {
+    if (!waitlist) {
       return res.status(409).json({ detail: "该场馆当日预约已满" });
     }
     const entry = await prisma.waitlistEntry.create({
@@ -104,7 +106,7 @@ router.post("/", async (req, res) => {
     });
   }
 
-  const created = await prisma.reservation.create({ data });
+  const created = await prisma.reservation.create({ data: reservationData });
   res.status(201).json({
     id: created.id,
     museum_id: created.museumId,
