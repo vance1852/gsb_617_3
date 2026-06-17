@@ -28,7 +28,8 @@ model Museum {
   status        String   @default("open") @db.VarChar(16)
   createdAt     DateTime @default(now()) @map("created_at")
 
-  reservations Reservation[]
+  reservations  Reservation[]
+  waitlistEntries WaitlistEntry[]
 
   @@map("museums")
 }
@@ -49,4 +50,21 @@ model Reservation {
 
   @@index([museumId, visitDate])
   @@map("reservations")
+}
+
+model WaitlistEntry {
+  id          Int      @id @default(autoincrement())
+  museumId    Int      @map("museum_id")
+  visitorName String   @map("visitor_name") @db.VarChar(64)
+  phone       String   @default("") @db.VarChar(32)
+  visitDate   String   @map("visit_date") @db.VarChar(10)
+  timeSlot    String   @map("time_slot") @db.VarChar(16)
+  passType    String   @map("pass_type") @db.VarChar(32)
+  status      String   @default("waiting") @db.VarChar(16)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  museum Museum @relation(fields: [museumId], references: [id], onDelete: Cascade)
+
+  @@index([museumId, visitDate, status])
+  @@map("waitlist_entries")
 }
