@@ -92,11 +92,85 @@ router.patch("/:id/status", async (req, res) => {
   const id = Number(req.params.id);
   const exists = await prisma.reservation.findUnique({ where: { id } });
   if (!exists) return res.status(404).json({ detail: "预约不存在" });
-  const updated = await prisma.reservation.update({
-    where: { id },
-    data: { status: parsed.data.status },
-  });
-  res.json({ id: updated.id, status: updated.status });
+
+  const newStatus = parsed.data.status;
+  const wasActive = exists.status !== "cancelled";
+  const becomesCancelled = newStatus === "cancelled";
+
+  if (becomesCancelled && wasActive) {
+    await processCancellationWithWaitlist(id, exists);
+  } else {
+    await prisma.reservation.update({
+      where: { id },
+      data: { status: newStatus },
+    });
+  }
+
+  res.json({ id, status: newStatus });
 });
+
+async function processCancellationWithWaitlist(
+  reservationId: number,
+  reservation: { museumId: number; visitDate: string },
+) {
+  await prisma.$transaction(async (tx) => {
+    await tx.reservation.update({
+      where: { id: reservationId },
+      data: { status: "cancelled" },
+    });
+
+    const museum = await tx.museum.findUnique({
+      where: { id: reservation.museumId },
+    });
+    if (!museum || museum.dailyCapacity <= 0) return;
+
+    while (true) {
+      const used = await tx.reservation.count({
+        where: {
+          museumId: reservation.museumId,
+          visitDate: reservation.visitDate,
+          status: { not: "cancelled" },
+        },
+      });
+      if (used >= museum.dailyCapacity) break;
+
+      const firstWaiting = await tx.waitlist.findFirst({
+        where: {
+          museumId: reservation.museumId,
+          visitDate: reservation.visitDate,
+          status: "waiting",
+        },
+        orderBy: { id: "asc" },
+      });
+      if (!firstWaiting) break;
+
+      const updated = await tx.waitlist.updateMany({
+        where: {
+          id: firstWaiting.id,
+          status: "waiting",
+        },
+        data: { status: "confirmed" },
+      });
+      if (updated.count === 0) continue;
+
+      const newReservation = await tx.reservation.create({
+        data: {
+          museumId: firstWaiting.museumId,
+          visitorName: firstWaiting.visitorName,
+          phone: firstWaiting.phone,
+          visitDate: firstWaiting.visitDate,
+          timeSlot: firstWaiting.timeSlot,
+          passType: firstWaiting.passType,
+          status: "booked",
+        },
+      });
+
+      await tx.waitlist.update({
+        where: { id: firstWaiting.id },
+        data: { reservationId: newReservation.id },
+      });
+    }
+  });
+}
 
 export default router;

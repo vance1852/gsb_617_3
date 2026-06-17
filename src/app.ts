@@ -3,6 +3,7 @@ import express from "express";
 import authRouter from "./routes/auth";
 import museumRouter from "./routes/museums";
 import reservationRouter from "./routes/reservations";
+import waitlistRouter from "./routes/waitlist";
 import dashboardRouter from "./routes/dashboard";
 
 export function createApp() {
@@ -16,6 +17,7 @@ export function createApp() {
   app.use("/api/auth", authRouter);
   app.use("/api/museums", museumRouter);
   app.use("/api/reservations", reservationRouter);
+  app.use("/api/waitlist", waitlistRouter);
   app.use("/api/dashboard", dashboardRouter);
 
   return app;
